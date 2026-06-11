@@ -1,0 +1,3 @@
+# Residual Short-Horizon Reversal in US Equities
+
+A factor-neutral, idiosyncratic short-term reversal strategy in US equities that strips out market, size, value, momentum, profitability, and investment factor returns via rolling OLS regression, then fades the k-day idiosyncratic overshoot. The signal is conditioned on Amihud illiquidity and VIX regime; portfolio construction uses cvxpy with dollar/beta/sector neutrality and a turnover penalty; performance is evaluated net of Corwin-Schultz spread costs and square-root market impact, and validated with combinatorial purged cross-validation (CPCV) and the deflated Sharpe ratio.
