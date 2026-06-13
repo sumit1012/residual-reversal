@@ -90,9 +90,12 @@ def get_ff_factors(config: Config) -> pd.DataFrame:
 
     logger.info("Fetching FF5 factors from pandas_datareader")
     ff5_raw = pdr.get_data_famafrench(_FF5_DATASET, start=config.start_date, end=config.end_date)[0]
+    ff5_raw.columns = ff5_raw.columns.str.strip()
 
     logger.info("Fetching UMD (momentum) from pandas_datareader")
     umd_raw = pdr.get_data_famafrench(_UMD_DATASET, start=config.start_date, end=config.end_date)[0]
+    # Ken French pads the momentum header with trailing spaces ("Mom   "); strip before selecting.
+    umd_raw.columns = umd_raw.columns.str.strip()
     umd = umd_raw[[_UMD_RAW_COL]].rename(columns={_UMD_RAW_COL: "UMD"})
 
     df = ff5_raw.join(umd, how="inner")

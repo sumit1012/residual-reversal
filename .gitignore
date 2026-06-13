@@ -18,6 +18,9 @@ cache/
 # All backtest outputs and trial logs
 data/
 
+# Transient terminal capture (the canonical copy lives in docs/sample_output/)
+run_terminal_output.txt
+
 # Derived data files (re-generated on first run)
 *.parquet
 *.pkl

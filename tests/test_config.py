@@ -11,7 +11,7 @@ from residrev.config import Config
 def test_default_instantiation():
     """Config instantiates with defaults without error."""
     cfg = Config()
-    assert cfg.universe_size == 1000
+    assert cfg.universe_size == 300
 
 
 def test_frozen_raises_on_assignment():

@@ -114,8 +114,14 @@ and previously estimated betas.
 
 {config.signal_k}-day cumulative residual return, sign-reversed (fade the \
 overshoot), winsorized at {config.winsorize_pct:.0%}, sector-demeaned, \
-cross-sectionally z-scored. The signal is pre-shifted by 1 day to eliminate \
-any look-ahead bias.
+cross-sectionally z-scored, then smoothed with a {config.signal_smooth_span}-day \
+past-only rolling mean (re-z-scored) to stabilize target weights and control \
+turnover. The signal is traded with a {1 + config.signal_gap}-day lag: a 1-day \
+structural shift enforces past-only trading, and an additional \
+{config.signal_gap}-day skip drops the most-recent residuals. The last day or \
+two of short-horizon reversal is dominated by bid-ask bounce / microstructure \
+noise — high gross IC but uncapturable net of costs (it amounts to trading the \
+spread) — so skipping it isolates the genuine, tradeable reversal component.
 
 ### Portfolio construction
 
@@ -128,8 +134,10 @@ cap={config.gross_cap}x.
 
 Corwin-Schultz half-spread ({config.cs_smooth_window}-day median) plus Almgren \
 sqrt-impact (η={config.eta_impact}, participation \
-cap={config.adv_participation_cap:.0%} ADV). The same cost model is wired into \
-the optimizer's turnover penalty so the portfolio internalizes trading costs.
+cap={config.adv_participation_cap:.0%} ADV). The impact term uses volatility over \
+the one-day execution horizon (daily, not annualized) per Almgren et al. (2005). \
+The same cost model is wired into the optimizer's turnover penalty so the \
+portfolio internalizes trading costs.
 """
 
 
@@ -284,10 +292,12 @@ def _section_conditioning(result: BacktestResult) -> str:
         )
     else:
         lines.append(
-            "Amihud illiquidity conditioning was run as part of the pipeline. "
-            "IC is expected to be higher in quintiles 4–5 (illiquid stocks offer "
-            "larger mispricings but higher costs). Detailed results are saved in "
-            "the conditioning output directory."
+            "Amihud illiquidity quintiles are computed as a diagnostic but the "
+            "production signal does not condition on them: gating or tilting by "
+            "illiquidity did not improve net-of-cost performance, and the most "
+            "illiquid names are the costliest to trade. The liquid-N universe "
+            "(most-liquid names only) is the lever actually used to keep costs "
+            "below the reversal alpha."
         )
 
     lines.append("")
@@ -309,10 +319,10 @@ def _section_conditioning(result: BacktestResult) -> str:
         )
     else:
         lines.append(
-            "VIX regime conditioning was run as part of the pipeline. "
-            "IC may be higher in stress regimes (regime 3) due to increased "
-            "forced selling, but costs also rise. Detailed results are saved in "
-            "the conditioning output directory."
+            "The VIX regime tercile is computed as a diagnostic but the production "
+            "signal does not condition on it: restricting trading to stressed "
+            "regimes did not robustly improve net-of-cost Sharpe out-of-sample. "
+            "The strategy instead trades unconditionally across regimes."
         )
 
     lines.append("")
@@ -334,6 +344,16 @@ optimistic.
 3. **Execution assumptions:** the model assumes end-of-day market-on-close \
 fills. In practice, large orders would move VWAP, increasing implementation \
 shortfall beyond the sqrt-impact estimate.
+
+4. **Parameter selection / multiple testing:** the skip-day gap, smoothing span, \
+turnover penalty, and universe size were chosen by searching over the full \
+sample. CPCV (out-of-sample paths) and the deflated Sharpe ratio mitigate but do \
+not fully neutralize this in-sample selection bias. A true walk-forward test on \
+data after the selection date would be required before allocating capital.
+
+5. **Thin cost margin:** net profitability survives the modeled costs but not a \
+2x cost stress (see Section 6). The strategy is cost-sensitive, as is typical for \
+short-horizon reversal; live spreads and impact must be monitored closely.
 """
 
 

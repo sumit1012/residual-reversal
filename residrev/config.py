@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class Config:
     # Universe & data
-    universe_size: int = 1000
+    universe_size: int = 300  # most-liquid N names: low enough cost for reversal alpha to survive
     adv_window: int = 63
     hysteresis_buffer: int = 200
     start_date: str = "2018-01-01"
@@ -26,10 +26,12 @@ class Config:
     # Signal
     signal_k: int = 5
     winsorize_pct: float = 0.01
+    signal_smooth_span: int = 5  # past-only rolling-mean smoothing of the signal (1 = off)
+    signal_gap: int = 2  # skip the most-recent `signal_gap` days (avoid bid-ask-bounce reversal)
 
     # Portfolio optimizer
     gamma: float = 5.0
-    lam_to: float = 10.0
+    lam_to: float = 3.0
     max_w: float = 0.02
     gross_cap: float = 2.0
     beta_tol: float = 1e-3

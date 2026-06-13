@@ -74,13 +74,15 @@ class TestBuildSignal:
         raw, _ = build_signal(resid, _make_sector_map(), cfg)
         assert raw.iloc[: cfg.signal_k - 1].isna().all().all()
 
-    def test_tradeable_is_raw_shifted_by_1(self):
+    def test_tradeable_is_raw_shifted_by_gap(self):
         resid = _make_resid()
-        raw, tradeable = build_signal(resid, _make_sector_map(), _cfg())
-        # tradeable[t] should equal raw[t-1]
+        cfg = _cfg()
+        raw, tradeable = build_signal(resid, _make_sector_map(), cfg)
+        # tradeable[t] should equal raw[t-(1+signal_gap)] (1-day lag + skip-day gap)
+        shift_n = 1 + cfg.signal_gap
         pd.testing.assert_frame_equal(
-            tradeable.iloc[1:].reset_index(drop=True),
-            raw.iloc[:-1].reset_index(drop=True),
+            tradeable.iloc[shift_n:].reset_index(drop=True),
+            raw.iloc[:-shift_n].reset_index(drop=True),
         )
 
     def test_winsorization_clips_extremes(self):
@@ -102,8 +104,15 @@ class TestBuildSignal:
         assert row.max() < 10.0  # winsorization tames extremes vs unbounded
 
     def test_sector_demeaning_zero_sector_mean(self):
-        """After sector-demeaning, each sector's mean should be ~0."""
-        cfg = _cfg(k=1)
+        """After sector-demeaning, each sector's mean should be ~0.
+
+        Smoothing disabled here: this test targets the sector-demean step in
+        isolation. The downstream rolling-mean smoothing deliberately mixes dates
+        and re-z-scores globally, so it does not preserve exact per-sector zero
+        means (portfolio sector-neutrality is enforced by the optimizer, not the
+        raw signal).
+        """
+        cfg = Config(signal_k=1, winsorize_pct=0.01, signal_smooth_span=1)
         tickers = [f"T{i}" for i in range(60)]
         resid = _make_resid(tickers, n_dates=20)
         sector_map = _make_sector_map(tickers)

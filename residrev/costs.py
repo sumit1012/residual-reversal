@@ -134,7 +134,12 @@ def compute_rebalance_cost(
         )
 
     participation = np.clip(raw_participation, 0.0, 1.0)
-    impact_cost = config.eta_impact * vol * np.sqrt(participation) * turnover
+    # Almgren et al. (2005) square-root impact uses volatility over the execution
+    # horizon (~1 trading day). `vol` arrives annualized (daily std * sqrt(252)),
+    # so convert back to a daily figure here; using the annualized value would
+    # overstate market impact by ~sqrt(252) ≈ 16x.
+    vol_daily = vol / np.sqrt(252.0)
+    impact_cost = config.eta_impact * vol_daily * np.sqrt(participation) * turnover
 
     total_cost = float((spread_cost + impact_cost).sum())
     return total_cost * 10_000.0

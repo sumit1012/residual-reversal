@@ -76,10 +76,29 @@ def build_signal(
         else:
             zscored.iloc[i] = (row - mu) / sigma
 
+    # Step 5 — temporal smoothing (past-only). A k-day reversal z-score is noisy
+    # day-to-day, which makes the optimizer churn the whole book chasing transient
+    # signal flips. A short rolling mean stabilizes the target alpha so the book
+    # turns over at a tradeable rate; we re-z-score per date so the alpha scale
+    # entering the optimizer stays O(1). The mean at date t uses only z-scores at
+    # t-span+1..t, all of which are built from residuals strictly before t — no
+    # look-ahead is introduced (the structural shift below is applied afterward).
+    span = config.signal_smooth_span
+    if span and span > 1:
+        smoothed = zscored.rolling(span, min_periods=1).mean()
+        mu = smoothed.mean(axis=1)
+        sigma = smoothed.std(axis=1).replace(0.0, np.nan)
+        zscored = smoothed.sub(mu, axis=0).div(sigma, axis=0)
+
     raw_signal = zscored
 
-    # structural lag: signal[t] is built from data through t-1
-    tradeable_signal = raw_signal.shift(1)
+    # Structural lag + skip-day gap. The 1-day shift enforces past-only trading
+    # (signal[t] is built from data through t-1). The extra `signal_gap` days skip
+    # the most-recent residuals: short-horizon "reversal" in the last day or two is
+    # dominated by bid-ask bounce / microstructure noise — strong gross IC but
+    # uncapturable net of costs (you'd be trading the spread). Skipping them
+    # isolates the genuine, tradeable reversal component.
+    tradeable_signal = raw_signal.shift(1 + config.signal_gap)
 
     logger.info(
         "build_signal: mean raw signal %.4f, std %.4f",
