@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 _FF5_DATASET = "F-F_Research_Data_5_Factors_2x3_daily"
 _UMD_DATASET = "F-F_Momentum_Factor_daily"
-_UMD_RAW_COL = "Mom   "
+_UMD_RAW_COL = "Mom"
 _EXPECTED_COLS = ["Mkt-RF", "SMB", "HML", "RMW", "CMA", "UMD", "RF"]
 
 _EDGAR_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -200,4 +200,7 @@ def get_factor_cov(
         )
         return None
 
-    return window_data.cov().values
+    # Exclude RF (risk-free rate) — it's not a risk factor and would make the
+    # covariance matrix (K+1)×(K+1) while B is N×K, causing quad_form to fail.
+    risk_cols = [c for c in window_data.columns if c != "RF"]
+    return window_data[risk_cols].cov().values

@@ -126,7 +126,8 @@ def get_vix(config: Config) -> pd.Series:
         if yf is None:  # pragma: no cover
             raise RuntimeError("Neither pandas-datareader nor yfinance is available")
         raw_df = yf.download("^VIX", start=config.start_date, end=config.end_date, progress=False)
-        vix = raw_df["Close"].dropna()
+        close = raw_df["Close"]
+        vix = (close.squeeze() if isinstance(close, pd.DataFrame) else close).dropna()
         logger.info("VIX downloaded from yfinance")
 
     # Normalise to tz-naive DatetimeIndex

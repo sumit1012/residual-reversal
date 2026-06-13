@@ -1,6 +1,6 @@
 yfinance>=0.2.40
 yahooquery>=2.3.7
-pandas>=2.2.0
+pandas>=2.2.0,<3.0
 pandas-datareader>=0.10.0
 pandas-market-calendars>=4.4.0
 numpy>=1.26.0

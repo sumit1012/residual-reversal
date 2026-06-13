@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import io
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import sys
 from datetime import datetime
 
 import pandas as pd
+import requests
 
 from residrev.analysis import summarize
 from residrev.backtest import BacktestResult, run_backtest
@@ -54,10 +56,14 @@ def get_tickers(args: argparse.Namespace) -> list[str]:
             tickers = [line.strip() for line in f if line.strip()]
     else:
         logger.info("Fetching S&P 500 constituents from Wikipedia")
+        _resp = requests.get(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            headers={"User-Agent": "Mozilla/5.0 (research-bot; educational use)"},
+            timeout=30,
+        )
+        _resp.raise_for_status()
         tickers = (
-            pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0][
-                "Symbol"
-            ]
+            pd.read_html(io.StringIO(_resp.text))[0]["Symbol"]
             .str.replace(".", "-", regex=False)
             .tolist()
         )
@@ -85,7 +91,7 @@ def run(
     adv = compute_adv(prices, window=config.adv_window)
 
     logger.info("Building universe membership")
-    membership = get_liquid_universe(adv, config)
+    membership = get_liquid_universe(adv, config.universe_size, config.hysteresis_buffer)
 
     logger.info("Building return panel")
     returns = build_return_panel(prices, membership)
@@ -110,7 +116,7 @@ def run(
     compute_vix_regime(vix, config)
 
     logger.info("Computing Corwin-Schultz spread")
-    spread = corwin_schultz_spread(prices, config)
+    spread = corwin_schultz_spread(prices, config.cs_smooth_window)
 
     logger.info("Computing realized vol")
     vol = compute_realized_vol(returns)
@@ -207,6 +213,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    log_dir = os.path.join("data", "results", run_id)
+    os.makedirs(log_dir, exist_ok=True)
+    _fh = logging.FileHandler(os.path.join(log_dir, "run.log"), encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logging.getLogger().addHandler(_fh)
+
     logger.info("Run ID: %s", run_id)
 
     try:
