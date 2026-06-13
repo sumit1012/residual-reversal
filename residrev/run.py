@@ -236,9 +236,14 @@ def main() -> None:
             summary["checklist"] = checklist_result
         if args.report:
             from residrev.report import generate_report
+            from residrev.html_report import generate_html_report
 
             report_path = os.path.join(config.data_dir, "results", run_id, "research_note.md")
             generate_report(result, summary, checklist_result, config, output_path=report_path)
+
+            html_path = os.path.join(config.data_dir, "results", run_id, "report.html")
+            generate_html_report(result, summary, checklist_result, config,
+                                 output_path=html_path, run_id=run_id)
         print(json.dumps(summary, indent=2))
     except Exception:
         logger.exception("Run failed")
