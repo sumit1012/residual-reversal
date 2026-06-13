@@ -198,6 +198,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tickers-file", dest="tickers_file", default=None)
     parser.add_argument("--eda", action="store_true", default=False)
     parser.add_argument("--no-checklist", dest="no_checklist", action="store_true", default=False)
+    parser.add_argument("--report", action="store_true", default=False,
+                        help="Generate research note to data/results/<run_id>/research_note.md")
     parser.add_argument("--output-dir", dest="output_dir", default=None)
     return parser.parse_args(argv)
 
@@ -215,8 +217,15 @@ def main() -> None:
         result, summary = run(config, tickers, eda_output_dir=eda_dir)
         save_outputs(result, summary, run_id, config)
         log_trial(summary, config, run_id)
+        checklist_result = None
         if not args.no_checklist:
-            summary["checklist"] = run_pre_trust_checklist(result, config)
+            checklist_result = run_pre_trust_checklist(result, config)
+            summary["checklist"] = checklist_result
+        if args.report:
+            from residrev.report import generate_report
+
+            report_path = os.path.join(config.data_dir, "results", run_id, "research_note.md")
+            generate_report(result, summary, checklist_result, config, output_path=report_path)
         print(json.dumps(summary, indent=2))
     except Exception:
         logger.exception("Run failed")

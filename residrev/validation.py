@@ -223,6 +223,54 @@ def deflated_sharpe(trials_log_path: str, result: BacktestResult) -> dict:
     }
 
 
+def cpcv_oos_sharpe(result: BacktestResult, config: Config) -> dict:
+    """CPCV out-of-sample Sharpe distribution across all combinatorial paths."""
+    pnl = result.pnl.dropna()
+    if len(pnl) < 50:
+        return {"status": "skip", "note": "insufficient data for CPCV"}
+
+    oos_sharpes: list[float] = []
+    for _, test_dates in cpcv_splits(
+        pnl.index,
+        n_groups=config.cpcv_n_groups,
+        k_test=config.cpcv_k_test,
+        purge=5,
+        embargo=config.cpcv_embargo,
+    ):
+        test_pnl = pnl.reindex(test_dates).dropna()
+        if len(test_pnl) >= 20:
+            oos_sharpes.append(annualized_sharpe(test_pnl))
+
+    if len(oos_sharpes) < 2:
+        return {"status": "skip", "note": "insufficient valid OOS paths"}
+
+    arr = np.array(oos_sharpes)
+    pct_positive = float((arr > 0).mean())
+
+    if pct_positive < 0.5:
+        status = "fail"
+    elif pct_positive < 0.75:
+        status = "warn"
+    else:
+        status = "pass"
+
+    logger.info(
+        "CPCV OOS Sharpe: %s (mean=%.2f, %d/%d positive)",
+        status.upper(), float(arr.mean()), int((arr > 0).sum()), len(arr),
+    )
+    return {
+        "status": status,
+        "oos_sharpes": [float(s) for s in oos_sharpes],
+        "mean": float(arr.mean()),
+        "std": float(arr.std()),
+        "median": float(np.median(arr)),
+        "min": float(arr.min()),
+        "max": float(arr.max()),
+        "pct_positive": pct_positive,
+        "n_paths": len(oos_sharpes),
+    }
+
+
 def run_pre_trust_checklist(result: BacktestResult, config: Config) -> dict:
     """Run all validation checks and print a formatted report."""
     checks: dict[str, dict] = {}
@@ -230,6 +278,7 @@ def run_pre_trust_checklist(result: BacktestResult, config: Config) -> dict:
     checks["cost_stress_test"] = cost_stress_test(result)
     checks["factor_crash_stress"] = factor_crash_stress(result)
     checks["deflated_sharpe"] = deflated_sharpe(config.trials_log, result)
+    checks["cpcv_oos_sharpe"] = cpcv_oos_sharpe(result, config)
 
     n_pass = sum(1 for c in checks.values() if c["status"] == "pass")
     n_warn = sum(1 for c in checks.values() if c["status"] == "warn")
@@ -297,6 +346,15 @@ def _print_report(
         lines.append(
             f"[{ds['status'].upper()}] Deflated Sharpe Ratio: "
             f"DSR = {ds['dsr']:.2f} ({ds['n_trials']} trials)"
+        )
+
+    cp = checks.get("cpcv_oos_sharpe", {})
+    if cp.get("status") == "skip":
+        lines.append(f"[SKIP] CPCV OOS Sharpe: {cp.get('note', '')}")
+    elif cp:
+        lines.append(
+            f"[{cp['status'].upper()}] CPCV OOS Sharpe: "
+            f"mean={cp['mean']:.2f}, {cp['pct_positive']*100:.0f}% positive ({cp['n_paths']} paths)"
         )
 
     lines.append("=" * 40)

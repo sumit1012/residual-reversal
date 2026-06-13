@@ -1,17 +1,46 @@
+# Virtual environment
 .venv/
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+
+# Testing
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Price and factor data cache
 cache/
-data/results/
+
+# All backtest outputs and trial logs
+data/
+
+# Derived data files (re-generated on first run)
 *.parquet
 *.pkl
+*.jsonl
+
+# Environment
 .env
+*.env.*
+
+# Build artifacts
 *.egg-info/
 dist/
 build/
+
+# OS
 .DS_Store
-!**/.gitkeep
+Thumbs.db
+
+# gsd / Claude Code internals
+.planning/
+.claude/
+dev_docs/
+
+# Editor
+.vscode/
+.idea/
