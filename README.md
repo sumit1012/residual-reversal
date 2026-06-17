@@ -39,8 +39,15 @@ either sleeve and roughly half the drawdown.**
 
 What survives any reasonable weighting: near-zero sleeve correlation, a combined
 in-sample Sharpe above both sleeves, and a roughly halved drawdown. Numbers are
-modest and honestly so — the point is the rigorous diversification result, not a
+modest and honestly so; the point is the rigorous diversification result, not a
 headline return.
+
+The table above is a local-build snapshot. The live dashboard regenerates daily on the
+CI runner and may show modestly different reversal and combined Sharpe: the reversal
+sleeve is numerically sensitive near its turnover cliff, so its (and the combined book's)
+Sharpe vary roughly 0.2 to 0.45 across runs and environments. The trend sleeve and the
+structural results (correlation near -0.05, combined above both sleeves, drawdown roughly
+halved) are stable. See the live dashboard for current figures.
 
 **Honest limitations.** Trend's standalone in-sample Sharpe is modest (the documented
 2010s trend drought); the live window is short; combined live is mildly negative
