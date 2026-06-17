@@ -10,7 +10,7 @@ controls, and a pre-registered out-of-sample live track.
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Data](https://img.shields.io/badge/data-free%20(yfinance%20%2B%20Ken%20French%20%2B%20FRED)-blue)
 
-> **Live dashboard:** _(Vercel URL — add after deploy)_ · **Full writeup:** [STRATEGY_SELECTION.md](STRATEGY_SELECTION.md)
+> **Live dashboard:** [residual-reversal-private.vercel.app](https://residual-reversal-private.vercel.app) ([backtest](https://residual-reversal-private.vercel.app/backtest) · [live](https://residual-reversal-private.vercel.app/live)) · **Full writeup:** [STRATEGY_SELECTION.md](STRATEGY_SELECTION.md)
 
 ---
 
