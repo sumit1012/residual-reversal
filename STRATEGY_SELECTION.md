@@ -1,5 +1,13 @@
 # Quant Portfolio Project — Strategy Selection & Build Blueprint
 
+> **Update (current direction).** The project is now framed **trend-primary**: cross-asset trend is the
+> return engine, and the residual-reversal sleeve is an honestly-evaluated diversifier that did **not** pay off
+> out-of-sample (it lost in the 2025-26 momentum regime and is solver-sensitive near its turnover cliff, so its
+> in-sample Sharpe varies run-to-run). The pre-registered freeze moved to **2025-01-01** (in-sample 2018 to
+> 2024-12-31, frozen; live 2025-present, refreshed daily). The strategy-selection analysis below remains valid;
+> the headline conclusion is updated to this honest, trend-led result. For current figures see the README and the
+> live dashboard.
+
 ## 1. Decision
 
 Build a **two-sleeve systematic book**:
