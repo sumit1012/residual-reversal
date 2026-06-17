@@ -28,6 +28,9 @@ import requests
 
 from residrev import combine, trend
 from residrev.config import Config
+from residrev.data import pull_prices
+from residrev.factors import get_sector_map
+from residrev.holdings import build_holdings
 from residrev.run import run as run_reversal_pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -59,19 +62,68 @@ def get_tickers_fixed() -> list[str]:
     return tickers
 
 
-def reversal_sleeve() -> pd.Series:
+def reversal_sleeve():
     cfg = dataclasses.replace(Config(), start_date=START, end_date=END, aum=25e6)
     logger.info("Building reversal sleeve...")
     result, _ = run_reversal_pipeline(cfg, get_tickers_fixed(), eda_output_dir=None)
     r = result.pnl.dropna()
     r.index = pd.DatetimeIndex(r.index).tz_localize(None)
-    return r
+    return r, result, cfg
 
 
-def trend_sleeve() -> pd.Series:
+def trend_sleeve():
     logger.info("Building trend sleeve...")
     px = trend.fetch_trend_prices(start="2013-01-01", end=None)
-    return trend.backtest_trend(px)["net"].dropna()
+    bt = trend.backtest_trend(px)
+    return bt["net"].dropna(), bt["weights"], px
+
+
+# --- holdings snapshot helpers --------------------------------------------
+_HOLD_CACHE: dict = {}
+
+
+def _naive(idx) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(idx)
+    return idx.tz_localize(None) if idx.tz is not None else idx
+
+
+def _recent_ret_dict(prices: dict, asof: pd.Timestamp, lookback: int = 21) -> pd.Series:
+    out: dict[str, float] = {}
+    for t, df in prices.items():
+        c = pd.Series(df["Close"].values, index=_naive(df["Close"].index))
+        c = c[c.index <= asof].dropna()
+        if len(c) > lookback:
+            out[t] = float(c.iloc[-1] / c.iloc[-1 - lookback] - 1)
+    return pd.Series(out)
+
+
+def _recent_ret_df(px: pd.DataFrame, asof: pd.Timestamp, lookback: int = 21) -> pd.Series:
+    c = px[px.index <= asof]
+    if len(c) <= lookback:
+        return pd.Series(dtype=float)
+    return c.iloc[-1] / c.iloc[-1 - lookback] - 1
+
+
+def _holdings_snapshot(rev_result, trd_w, trd_px, cfg, target):
+    """Build a holdings snapshot at the latest date (target=None) or last date before
+    `target` (the freeze, for the frozen backtest snapshot)."""
+    pos = rev_result.positions.copy(); pos.index = _naive(pos.index)
+    tw = trd_w.copy(); tw.index = _naive(tw.index)
+    tpx = trd_px.copy(); tpx.index = _naive(tpx.index)
+    if "prices" not in _HOLD_CACHE:
+        _HOLD_CACHE["prices"] = pull_prices(get_tickers_fixed(), cfg.start_date, cfg.end_date, cfg)
+        _HOLD_CACHE["sector"] = get_sector_map(get_tickers_fixed(), cfg)
+    prices, sector_map = _HOLD_CACHE["prices"], _HOLD_CACHE["sector"]
+    if target is None:
+        rev_date, trd_date = pos.index.max(), tw.index.max()
+    else:
+        rev_date = pos.index[pos.index < target].max()
+        trd_date = tw.index[tw.index < target].max()
+    return build_holdings(
+        pos.loc[rev_date], _recent_ret_dict(prices, rev_date),
+        tw.loc[trd_date], _recent_ret_df(tpx, trd_date),
+        sector_map, cfg.aum, str(rev_date.date()), str(trd_date.date()),
+    )
 
 
 def spx_series() -> pd.Series:
@@ -120,7 +172,8 @@ def _book_live(r):
 
 
 def compute():
-    rev, trd = reversal_sleeve(), trend_sleeve()
+    rev, rev_result, rev_cfg = reversal_sleeve()
+    trd, trd_w, trd_px = trend_sleeve()
     sleeves = {"reversal": rev, "trend": trd}
     comb = combine.combine(sleeves, scheme="risk_parity", target_vol=0.10)["combined"]
     panel = combine.align_sleeves(sleeves)
@@ -138,11 +191,16 @@ def compute():
         lv = _book_live(s[s.index >= fz])
         live["books"][name] = {k: lv[k] for k in ("sharpe", "return_pct", "max_dd_pct", "curve")}
         live["as_of"][name] = lv["as_of"]
-    return backtest, live, corr, series
+
+    holdings = {
+        "backtest": _holdings_snapshot(rev_result, trd_w, trd_px, rev_cfg, target=fz),
+        "live": _holdings_snapshot(rev_result, trd_w, trd_px, rev_cfg, target=None),
+    }
+    return backtest, live, corr, series, holdings
 
 
 def main(live_only: bool):
-    backtest, live, corr, series = compute()
+    backtest, live, corr, series, holdings = compute()
     report = {
         "freeze_date": FREEZE,
         "generated_at": max(v for v in live["as_of"].values() if v),
@@ -155,9 +213,15 @@ def main(live_only: bool):
     if live_only and os.path.exists(OUT):
         prev = json.load(open(OUT))
         report["backtest"] = prev.get("backtest", backtest)  # keep frozen backtest
-        logger.info("--live-only: preserved committed backtest block")
+        prev_h = prev.get("holdings", {})
+        report["holdings"] = {
+            "backtest": prev_h.get("backtest", holdings["backtest"]),  # frozen snapshot
+            "live": holdings["live"],                                  # refreshes daily
+        }
+        logger.info("--live-only: preserved committed backtest block + frozen holdings")
     else:
         report["backtest"] = backtest
+        report["holdings"] = holdings
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     json.dump(report, open(OUT, "w"), indent=2)

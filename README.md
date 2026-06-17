@@ -37,13 +37,14 @@ that does not hold, is the point of the project.
 | Reversal | 0.29* | 1.3% | 4.8% | −7.0% |
 | Combined (risk-parity) | 0.52 | 5.3% | — | −13.3% |
 
-**Live, out-of-sample, 2025-01-01 → present** (parameters frozen; refreshed daily):
+**Live, out-of-sample, 2025-01-01 → present** (parameters frozen; refreshed daily, so these
+drift, see the live dashboard for current figures):
 
 | Sleeve | Live return | Live Sharpe |
 |--------|-------------|-------------|
 | Trend | +10.9% | 0.71 |
-| Reversal | −11.9% | −1.52 |
-| Combined | −8.0% | −0.53 |
+| Reversal | −14.2% | −1.76 |
+| Combined | −9.4% | −0.64 |
 
 Sleeve correlation: **−0.05**. The reversal/combined backtest figures are marked `*`
 because the reversal optimizer is degenerate near its turnover cliff: its in-sample
