@@ -39,6 +39,8 @@ Trend wins on durability and free-data feasibility; combining it with the existi
 
 ## 3. Verified results (real backtests, not estimates)
 
+> **Note on the numbers below.** This section documents an earlier exploratory run with a **2025-06-01** boundary. The project was subsequently re-frozen at the pre-registered **2025-01-01** freeze (backtest <= 2024-12-31). The **authoritative, current frozen figures** are in the [README](README.md) and the [live dashboard](https://residual-reversal-private.vercel.app); for reference they are: backtest Sharpe trend **0.46** / reversal **0.29** / combined **0.52**; live (2025-01-01 onward) trend **+10.9%** / reversal **-11.9%** / combined **-8.0%**; sleeve correlation **-0.05**. The qualitative conclusions (trend is the engine; reversal is a near-uncorrelated, regime-fragile diversifier that hurt out-of-sample) are unchanged. The exploratory table below is retained for transparency.
+
 All single-threaded and reproducible. Train/live boundary (freeze) = **2025-06-01**. Common evaluation window for the two-sleeve comparison is 2018-06 to 2026-04 (the reversal sleeve needs Ken French factor data, which currently ends 2026-04; the trend sleeve alone runs 2015 to 2026-06).
 
 **Trend sleeve, standalone (daily, 12 ETFs, vol-targeted 10%, weekly rebalance):**
