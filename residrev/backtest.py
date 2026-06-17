@@ -172,6 +172,7 @@ def run_backtest(
             costs_bps_t = compute_rebalance_cost(
                 w_prev_cost, w_new_cost,
                 cost_spread_t, cost_adv_t, cost_vol_t, config,
+                aum=config.aum,
             )
         else:
             costs_bps_t = 0.0

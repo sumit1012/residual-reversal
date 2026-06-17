@@ -39,6 +39,7 @@ class Config:
     sigma_f_window: int = 252
 
     # Costs
+    aum: float = 1e8  # portfolio AUM (USD); drives market-impact via participation = Δw·AUM/ADV
     eta_impact: float = 0.5
     adv_participation_cap: float = 0.10
     cs_smooth_window: int = 21

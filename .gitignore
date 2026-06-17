@@ -15,11 +15,19 @@ htmlcov/
 # Price and factor data cache
 cache/
 
-# All backtest outputs and trial logs
-data/
+# All backtest outputs and trial logs (anchored to repo root so site/public/data/ is NOT ignored)
+/data/
 
 # Transient terminal capture (the canonical copy lives in docs/sample_output/)
 run_terminal_output.txt
+
+# Temp research/build scratch (not part of the deliverable)
+_*.py
+_*.log
+_*.json
+_*.md
+_*.pkl
+_scout_scratch/
 
 # Derived data files (re-generated on first run)
 *.parquet
