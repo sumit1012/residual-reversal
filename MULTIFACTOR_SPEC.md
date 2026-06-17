@@ -144,3 +144,28 @@ Add lag tests mirroring the reversal sleeve: assert the composite at t is a func
 **Phase 6, Derived analytics + site wiring.** `build_derived.py` already derives tear-sheet analytics from the *frozen* `report.json` curves without recomputing, extend `BOOKS = ("reversal","trend","combined")` to include `"multifactor"` once it is in the frozen block, plus the 3-sleeve correlation matrix and the 2-vs-3-sleeve diversification delta. Add the sleeve to the dashboard pages and the methodology write-up, including the honest negative if gates fail.
 
 **Decision point.** If any kill criterion in section 7 fires, do **not** add the sleeve to the live report, document the negative in `STRATEGY_SELECTION.md` (consistent with the project's honest-reporting discipline) and stop. The build only reaches Phase 6 inclusion after Phase 3 passes cleanly.
+
+---
+
+## 10 Result: built, tested, and rejected by its own gates
+
+The sleeve was built exactly as pre-registered (residual 12-1 momentum + low idiosyncratic volatility, fixed equal weight, decile long/short with inverse-idio-vol risk weighting within each leg, monthly rebalance, net of the Corwin-Schultz + Almgren cost model) and run on the pinned S&P 500 universe, 2018 to 2026-04. It **fails its pre-registered kill criteria and is NOT shipped to the live book.**
+
+In-sample (to 2024-12-31), net of costs:
+
+| Metric | Value | Gate | Verdict |
+|---|---|---|---|
+| In-sample net Sharpe | -0.71 | > 0 | fail |
+| Keystone factor IC (residual 12-1 momentum) | -0.023 (t_HAC -3.25) | positive | fail (significant, wrong sign) |
+| Deflated Sharpe (corrected; 4 trials) | 0.015 | >= 0.80 | fail |
+| CPCV OOS (15 paths, purge 21 / embargo 0.05) | 7% positive, mean OOS Sharpe -0.78 | >= 75% positive | fail |
+| Sharpe at 2x costs | -1.09 | > 0 | fail |
+| PBO | 0.22 | <= 0.20 | warn |
+
+All four pre-registered variants (idio-vol or BAB, with and without the 52-week-high factor) are negative in-sample (-0.48 to -0.71).
+
+**Why (mechanism, not a bug).** The keystone factor is residual 12-1 momentum, computed on residuals that already have the UMD (momentum) factor stripped out. On the large-cap S&P 500 over this window, the leftover idiosyncratic 12-month component **mean-reverts rather than trends**: residual winners underperform (IC -0.023, t -3.25). Long residual momentum is the wrong direction here. The low-risk factors are also weak or negative (low-volatility and betting-against-beta were hurt in the 2020-21 growth melt-up and the 2025 high-beta rally). The implementation sign was verified against forward returns, so this is a genuine negative result, not a defect.
+
+**Decision.** Per kill criteria #3, #4, and #7, the sleeve is rejected. It is not added to the combined book or the live dashboard. This is the project's second pre-registered, honestly-reported negative result. The code (`residrev/multifactor.py`), its unit tests (`tests/test_multifactor.py`), and the corrected validation machinery (a Deflated Sharpe that now uses the candidate's own Sharpe deflated by an honest trial count, plus a new PBO / CSCV check in `validation.py`) are retained for reproducibility. The corrected Deflated Sharpe also confirms the existing reversal sleeve does not clear the deflated-Sharpe bar on its archived trials, which the live methodology page had flagged as "pending audit."
+
+**What it would take to revisit (deliberately not done here).** The finding points at a long-horizon *residual reversal* effect on large caps. Testing that is a NEW hypothesis and must be pre-registered with a fresh forward freeze; reusing this window after seeing the result would be exactly the back-fitting the project is built to avoid.

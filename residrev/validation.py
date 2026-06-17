@@ -162,49 +162,75 @@ def factor_crash_stress(result: BacktestResult) -> dict:
     return {"status": status, **results_by_period}
 
 
-def deflated_sharpe(trials_log_path: str, result: BacktestResult) -> dict:
-    """Deflated Sharpe Ratio (Bailey & Lopez de Prado 2014)."""
-    try:
-        with open(trials_log_path, "r") as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        logger.info("Deflated Sharpe: skip (trials log not found)")
-        return {"status": "skip", "note": "trials log not found"}
+_EULER_MASCHERONI = 0.5772156649015329
 
-    trials = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+
+def deflated_sharpe(
+    trials_log_path: str,
+    result: BacktestResult,
+    candidate_sharpe: float | None = None,
+    trial_sharpes: list[float] | None = None,
+    periods_per_year: int = 252,
+) -> dict:
+    """Deflated Sharpe Ratio (Bailey & Lopez de Prado 2014), corrected.
+
+    The deflated Sharpe asks: after trying ``T`` configurations, is THIS candidate's
+    Sharpe high enough to be unlikely under the null of zero true skill? The benchmark
+    SR0 is the EXPECTED MAXIMUM Sharpe across ``T`` zero-skill trials, scaled by the
+    dispersion of the trial Sharpes (False Strategy Theorem):
+
+        SR0 = std(SR_trials) * [ (1-gamma)*Z^-1(1 - 1/T) + gamma*Z^-1(1 - 1/(T*e)) ]
+        DSR = Phi( (SR_hat - SR0) * sqrt(n-1) / sqrt(1 - g3*SR_hat + (g4-1)/4*SR_hat^2) )
+
+    SR_hat is the CANDIDATE'S OWN per-period Sharpe (the prior implementation used the
+    max across heterogeneous trials, which is wrong: it tests whether the best trial
+    beats the expected max, not whether the candidate does). All Sharpes are converted
+    to per-period before combining. ``g4`` is the non-excess kurtosis.
+    """
+    trials = trial_sharpes
+    if trials is None:
         try:
-            entry = json.loads(line)
-            trials.append(entry["net_sharpe"])
-        except (json.JSONDecodeError, KeyError):
-            continue
-
-    if len(trials) < 2:
-        logger.info("Deflated Sharpe: skip (insufficient trials: %d)", len(trials))
-        return {"status": "skip", "note": "insufficient trials"}
+            with open(trials_log_path, "r") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            logger.info("Deflated Sharpe: skip (trials log not found)")
+            return {"status": "skip", "note": "trials log not found"}
+        trials = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                trials.append(float(json.loads(line)["net_sharpe"]))
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                continue
 
     T_trials = len(trials)
-    sr_star = max(trials)
+    if T_trials < 2:
+        logger.info("Deflated Sharpe: skip (insufficient trials: %d)", T_trials)
+        return {"status": "skip", "note": "insufficient trials"}
 
     clean_pnl = result.pnl.dropna()
     n = len(clean_pnl)
     if n < 20:
         return {"status": "skip", "note": "insufficient return observations"}
 
+    sr_ann = candidate_sharpe if candidate_sharpe is not None else annualized_sharpe(clean_pnl)
+    sr = sr_ann / sqrt(periods_per_year)                       # candidate per-period Sharpe
     gamma3 = float(skew(clean_pnl.values))
-    gamma4 = float(kurtosis(clean_pnl.values, fisher=True))
+    gamma4 = float(kurtosis(clean_pnl.values, fisher=False))   # non-excess
 
-    v_sr = (1 - gamma3 * sr_star + (gamma4 - 1) / 4 * sr_star**2) / (n - 1)
+    trials_pp = np.array(trials, dtype=float) / sqrt(periods_per_year)
+    std_trials = float(np.std(trials_pp, ddof=1)) if T_trials > 1 else 0.0
+    z1 = float(norm.ppf(1 - 1.0 / T_trials))
+    z2 = float(norm.ppf(1 - 1.0 / (T_trials * np.e)))
+    sr0 = std_trials * ((1 - _EULER_MASCHERONI) * z1 + _EULER_MASCHERONI * z2)
 
-    e_max_sr = float(norm.ppf(1 - 1 / T_trials))
-
-    if v_sr > 0:
-        dsr = float(norm.cdf((sr_star - e_max_sr) / sqrt(v_sr)))
-    else:
+    denom_sq = 1 - gamma3 * sr + (gamma4 - 1) / 4 * sr**2
+    if denom_sq <= 0:
         dsr = 0.0
+    else:
+        dsr = float(norm.cdf((sr - sr0) * sqrt(n - 1) / sqrt(denom_sq)))
 
     if dsr >= 0.95:
         status = "pass"
@@ -213,18 +239,67 @@ def deflated_sharpe(trials_log_path: str, result: BacktestResult) -> dict:
     else:
         status = "fail"
 
-    logger.info("Deflated Sharpe: %s (DSR=%.3f, %d trials)", status.upper(), dsr, T_trials)
+    logger.info("Deflated Sharpe: %s (DSR=%.3f, SR_ann=%.3f, SR0_ann=%.3f, %d trials)",
+                status.upper(), dsr, sr_ann, sr0 * sqrt(periods_per_year), T_trials)
     return {
         "status": status,
         "dsr": dsr,
         "n_trials": T_trials,
-        "best_sharpe": sr_star,
-        "e_max_sharpe": e_max_sr,
+        "candidate_sharpe": sr_ann,
+        "sr0_threshold_ann": sr0 * sqrt(periods_per_year),
     }
 
 
-def cpcv_oos_sharpe(result: BacktestResult, config: Config) -> dict:
-    """CPCV out-of-sample Sharpe distribution across all combinatorial paths."""
+def probability_of_backtest_overfitting(returns_matrix: pd.DataFrame, n_splits: int = 12) -> dict:
+    """Combinatorially-Symmetric Cross-Validation PBO (Bailey-Borwein-Lopez de Prado-Zhu 2017).
+
+    ``returns_matrix``: columns = candidate strategies/trials, rows = time (aligned returns).
+    Splits time into ``n_splits`` contiguous blocks; over all C(n_splits, n_splits/2) ways to
+    choose the in-sample half, picks the IS-best strategy by Sharpe and records its rank in the
+    complementary out-of-sample half. PBO = fraction of splits where the IS-best lands below the
+    OOS median (logit < 0).
+    """
+    R = returns_matrix.dropna(how="any")
+    n_strat = R.shape[1]
+    if n_strat < 2 or len(R) < n_splits * 2:
+        return {"status": "skip", "note": "insufficient strategies or observations"}
+    if n_splits % 2 == 1:
+        n_splits -= 1
+
+    blocks = np.array_split(np.arange(len(R)), n_splits)
+    half = n_splits // 2
+
+    def _sharpe(x):
+        s = x.std()
+        return float(x.mean() / s) if s > 0 else 0.0
+
+    logits, n_overfit = [], 0
+    for is_groups in combinations(range(n_splits), half):
+        is_idx = np.concatenate([blocks[g] for g in is_groups])
+        oos_idx = np.concatenate([blocks[g] for g in range(n_splits) if g not in is_groups])
+        is_sr = R.iloc[is_idx].apply(_sharpe)
+        oos_sr = R.iloc[oos_idx].apply(_sharpe)
+        best = is_sr.idxmax()
+        rank = oos_sr.rank(pct=True)[best]      # in (0,1]; relative OOS performance of IS-best
+        rank = min(max(rank, 1e-6), 1 - 1e-6)
+        logits.append(float(np.log(rank / (1 - rank))))
+        if rank < 0.5:
+            n_overfit += 1
+    pbo = n_overfit / len(logits)
+    status = "pass" if pbo <= 0.20 else ("warn" if pbo <= 0.50 else "fail")
+    logger.info("PBO: %s (%.2f over %d splits)", status.upper(), pbo, len(logits))
+    return {"status": status, "pbo": pbo, "n_splits_evaluated": len(logits),
+            "median_logit": float(np.median(logits))}
+
+
+def cpcv_oos_sharpe(result: BacktestResult, config: Config,
+                    purge: int = 5, embargo: float | None = None) -> dict:
+    """CPCV out-of-sample Sharpe distribution across all combinatorial paths.
+
+    `purge`/`embargo` should scale with the signal half-life: the reversal sleeve uses
+    purge=5/embargo=0.01; a slow (252-day) multi-factor sleeve needs purge=21/embargo~=0.05
+    or the long lookback leaks across folds.
+    """
     pnl = result.pnl.dropna()
     if len(pnl) < 50:
         return {"status": "skip", "note": "insufficient data for CPCV"}
@@ -234,8 +309,8 @@ def cpcv_oos_sharpe(result: BacktestResult, config: Config) -> dict:
         pnl.index,
         n_groups=config.cpcv_n_groups,
         k_test=config.cpcv_k_test,
-        purge=5,
-        embargo=config.cpcv_embargo,
+        purge=purge,
+        embargo=config.cpcv_embargo if embargo is None else embargo,
     ):
         test_pnl = pnl.reindex(test_dates).dropna()
         if len(test_pnl) >= 20:

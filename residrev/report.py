@@ -256,7 +256,9 @@ def _section_robustness(
         elif "dsr" in ds:
             lines.append(f"- DSR: {ds['dsr']:.3f}")
             lines.append(f"- Number of trials: {ds['n_trials']}")
-            lines.append(f"- Best observed Sharpe: {ds['best_sharpe']:.2f}")
+            if "candidate_sharpe" in ds:
+                lines.append(f"- Candidate Sharpe: {ds['candidate_sharpe']:.2f} "
+                             f"(threshold SR0: {ds.get('sr0_threshold_ann', float('nan')):.2f})")
             interp = "passes" if ds['dsr'] >= 0.95 else "does not pass"
             lines.append(
                 f"- Interpretation: the observed Sharpe {interp} the "
