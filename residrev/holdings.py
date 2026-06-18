@@ -70,7 +70,7 @@ def _book_summary(weights: pd.Series, aum: float) -> dict:
 
 
 def reversal_holdings(pos_row: pd.Series, recent: pd.Series, sector_map: dict[str, str],
-                      aum: float, top_n: int = 15) -> dict:
+                      aum: float, top_n: int = 15, heat_n: int = 140) -> dict:
     w = pos_row.dropna()
     w = w[w.abs() > _MIN_W]
     groups = pd.Series({t: sector_map.get(t, "Other") for t in w.index})
@@ -78,10 +78,14 @@ def reversal_holdings(pos_row: pd.Series, recent: pd.Series, sector_map: dict[st
     shorts = w[w < 0].sort_values()
     top_long = [_row_to_dict(t, longs[t], groups[t], recent.get(t), aum) for t in longs.index[:top_n]]
     top_short = [_row_to_dict(t, shorts[t], groups[t], recent.get(t), aum) for t in shorts.index[:top_n]]
+    # Full position list (largest by dollar value) for the finviz-style heatmap, capped.
+    order = w.abs().sort_values(ascending=False).index[:heat_n]
+    positions = [_row_to_dict(t, w[t], groups[t], recent.get(t), aum) for t in order]
     return {
         "summary": _book_summary(w, aum),
         "top_long": top_long,
         "top_short": top_short,
+        "positions": positions,
         "sectors": _agg_by_group(w, groups, recent, aum),
     }
 
