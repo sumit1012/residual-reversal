@@ -37,14 +37,14 @@ that does not hold, is the point of the project.
 | Reversal | 0.29* | 1.3% | 4.8% | −7.0% |
 | Combined (risk-parity) | 0.52 | 5.3% | — | −13.3% |
 
-**Live, out-of-sample, 2025-01-01 → present** (parameters frozen; refreshed daily, so these
-drift, see the live dashboard for current figures):
-
-| Sleeve | Live return | Live Sharpe |
-|--------|-------------|-------------|
-| Trend | +10.9% | 0.71 |
-| Reversal | −14.2% | −1.76 |
-| Combined | −9.4% | −0.64 |
+**Live, out-of-sample, 2025-01-01 → present** (parameters frozen; refreshed daily). The live
+figures drift day-to-day, and the reversal sleeve's optimizer is solver-sensitive run-to-run,
+so this README deliberately does **not** hardcode them: the
+[live dashboard](https://residual-reversal-private.vercel.app/live) is the single source of
+truth for the current trend / reversal / combined returns and Sharpes. The honest summary is
+stable regardless of the exact figures: trend earns through the 2025-26 momentum regime, the
+reversal diversifier loses in it (it is structurally short momentum), and the combined book
+ends modestly negative, below trend alone. That is the result the project reports.
 
 Sleeve correlation: **−0.05**. The reversal/combined backtest figures are marked `*`
 because the reversal optimizer is degenerate near its turnover cliff: its in-sample

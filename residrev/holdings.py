@@ -22,10 +22,15 @@ TREND_ASSET_CLASS: dict[str, str] = {
 
 _MIN_W = 1e-5
 
+# Display-only relabel for tickers renamed since the universe was pinned. Data is still
+# pulled under the pinned symbol (so the frozen backtest is unchanged), but the snapshot
+# shows the current symbol. e.g. Fiserv FISV -> FI (renamed 2023).
+_TICKER_RELABEL = {"FISV": "FI"}
+
 
 def _row_to_dict(ticker, w, group, recent, aum):
     return {
-        "ticker": str(ticker),
+        "ticker": _TICKER_RELABEL.get(str(ticker), str(ticker)),
         "group": group,
         "side": "long" if w >= 0 else "short",
         "weight_pct": round(float(w) * 100.0, 2),
