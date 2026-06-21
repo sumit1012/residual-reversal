@@ -59,8 +59,13 @@ def fetch_trend_prices(
     tickers = tickers or list(TREND_UNIVERSE)
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, "etf_closes.parquet")
+    cached = None
     if os.path.exists(cache_path):
-        cached = pd.read_parquet(cache_path)
+        try:
+            cached = pd.read_parquet(cache_path)
+        except Exception:
+            cached = None
+    if cached is not None:
         have = [t for t in tickers if t in cached.columns]
         if len(have) == len(tickers) and (end is None or cached.index.max() >= pd.Timestamp(end) - pd.Timedelta(days=7)):
             logger.info("Loaded trend prices from cache: %s", cache_path)
@@ -72,6 +77,15 @@ def fetch_trend_prices(
         raw = raw.to_frame()
     raw.index = pd.DatetimeIndex(raw.index).tz_localize(None)
     raw = raw.dropna(how="all").ffill(limit=2)
+    # Append-only (point-in-time): keep cached history and add only genuinely new dates from
+    # the fresh pull, so historical adjusted closes do not revise run-to-run (mirrors data.py).
+    # Pins the trend sleeve's live block; with the reversal sleeve already pinned, the combined
+    # live number reproduces run-to-run.
+    if cached is not None and not cached.empty and set(raw.columns) == set(cached.columns):
+        raw = raw[list(cached.columns)]
+        new_tail = raw[raw.index > cached.index.max()]
+        raw = pd.concat([cached, new_tail])
+        raw = raw[~raw.index.duplicated(keep="first")]
     raw.to_parquet(cache_path)
     return raw[[t for t in tickers if t in raw.columns]]
 
