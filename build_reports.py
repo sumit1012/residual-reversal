@@ -75,7 +75,7 @@ def trend_sleeve():
     logger.info("Building trend sleeve...")
     px = trend.fetch_trend_prices(start="2013-01-01", end=None)
     bt = trend.backtest_trend(px)
-    return bt["net"].dropna(), bt["weights"], px
+    return bt["net"].dropna(), bt["weights"], px, bt
 
 
 # --- holdings snapshot helpers --------------------------------------------
@@ -165,15 +165,40 @@ def _book_live(r):
     return {
         "sharpe": _sharpe(r),
         "return_pct": round((float((1 + r).prod()) - 1) * 100, 1) if len(r) else None,
+        "ann_return_pct": round(float(r.mean() * TD) * 100, 2) if len(r) else None,
+        "ann_vol_pct": round(float(r.std() * np.sqrt(TD)) * 100, 1) if len(r) > 1 and r.std() else None,
         "max_dd_pct": _mdd(r),
-        "curve": _curve(r, ds=2),
+        "curve": _curve(r, ds=1),   # full daily resolution: accurate live tails / n / drawdown
         "as_of": r.index.max().strftime("%Y-%m-%d") if len(r) else None,
+    }
+
+
+def _naive_series(s):
+    s = s.copy()
+    s.index = pd.DatetimeIndex(s.index).tz_localize(None) if getattr(s.index, "tz", None) is not None else pd.DatetimeIndex(s.index)
+    return s
+
+
+def _cost_stats(gross, net, turnover):
+    """Gross-to-net and annualized two-way turnover for a sleeve over the given series."""
+    g, n, t = gross.dropna(), net.dropna(), turnover.dropna()
+    idx = g.index.intersection(n.index).intersection(t.index)
+    if len(idx) < 20:
+        return None
+    g, n, t = g.reindex(idx), n.reindex(idx), t.reindex(idx)
+    gross_ann = float(g.mean() * TD) * 100
+    net_ann = float(n.mean() * TD) * 100
+    return {
+        "ann_turnover_x": round(float(t.mean() * TD), 1),  # annualized two-way turnover (x of book)
+        "gross_ann_pct": round(gross_ann, 2),
+        "net_ann_pct": round(net_ann, 2),
+        "cost_drag_pct": round(gross_ann - net_ann, 2),
     }
 
 
 def compute():
     rev, rev_result, rev_cfg = reversal_sleeve()
-    trd, trd_w, trd_px = trend_sleeve()
+    trd, trd_w, trd_px, trd_bt = trend_sleeve()
     sleeves = {"reversal": rev, "trend": trd}
     comb = combine.combine(sleeves, scheme="risk_parity", target_vol=0.10)["combined"]
     panel = combine.align_sleeves(sleeves)
@@ -189,8 +214,21 @@ def compute():
         s = s.dropna()
         backtest["books"][name] = _book_backtest(s[s.index < fz])
         lv = _book_live(s[s.index >= fz])
-        live["books"][name] = {k: lv[k] for k in ("sharpe", "return_pct", "max_dd_pct", "curve")}
+        live["books"][name] = {k: lv[k] for k in ("sharpe", "return_pct", "ann_return_pct", "ann_vol_pct", "max_dd_pct", "curve")}
         live["as_of"][name] = lv["as_of"]
+
+    # Gross-to-net and turnover per sleeve over the live window (representative of the
+    # strategy; a short-horizon reversal sleeve lives or dies on this gap). Both sleeves
+    # expose gross/net/turnover series; the combined book's are sleeve-level by design.
+    rev_gross, rev_net, rev_to = (_naive_series(rev_result.gross_pnl),
+                                  _naive_series(rev_result.pnl), _naive_series(rev_result.turnover))
+    trd_gross, trd_net, trd_to = (_naive_series(trd_bt["gross"]),
+                                  _naive_series(trd_bt["net"]), _naive_series(trd_bt["turnover"]))
+    live["costs"] = {}
+    for nm, gr, ne, to in [("reversal", rev_gross, rev_net, rev_to), ("trend", trd_gross, trd_net, trd_to)]:
+        cs = _cost_stats(gr[gr.index >= fz], ne[ne.index >= fz], to[to.index >= fz])
+        if cs:
+            live["costs"][nm] = cs
 
     holdings = {
         "backtest": _holdings_snapshot(rev_result, trd_w, trd_px, rev_cfg, target=fz),
