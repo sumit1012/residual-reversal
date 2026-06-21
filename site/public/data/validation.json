@@ -1,0 +1,11 @@
+{
+  "dsr": {
+    "trials_sharpe": [-0.11, -0.087, -0.087, 0.042, 0.262, 0.263, 0.264, 0.457],
+    "n_trials": 8,
+    "sr0_deflated_bar": 0.312,
+    "candidate_sharpe": 0.29,
+    "best_trial_sharpe": 0.457,
+    "clears": false,
+    "note": "Annualized net Sharpe of each logged reversal configuration. The deflated bar (Bailey & Lopez de Prado) is the Sharpe a single trial must clear to be genuine after trying this many; the shipped candidate sits below it, so the sleeve does not clear its deflated-Sharpe bar."
+  }
+}

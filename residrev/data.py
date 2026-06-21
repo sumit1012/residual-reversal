@@ -191,6 +191,15 @@ def pull_prices(
         for ticker in chunk:
             df = _extract_ticker(raw, ticker) if raw is not None else None
             if df is not None and not df.empty:
+                # Append-only (point-in-time): if this ticker is already cached, keep the
+                # cached history and take only the genuinely new dates from the fresh pull.
+                # yfinance re-adjusts the whole series on every pull, so overwriting would
+                # silently revise history and make the live track non-reproducible run-to-run.
+                # New tickers cache in full; this path cannot regress (cached is None -> as before).
+                cached = load_cached(ticker, config.cache_dir)
+                if cached is not None and not cached.empty:
+                    tail = df[df.index > cached.index.max()]
+                    df = pd.concat([cached, tail]) if len(tail) else cached
                 save_cached(ticker, df, config.cache_dir)
                 out[ticker] = df
             else:
