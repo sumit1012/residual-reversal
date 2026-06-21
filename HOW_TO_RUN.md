@@ -190,7 +190,7 @@ print(trials[["run_id", "summary"]].assign(
 ## 9. Running the Tests
 
 ```bash
-# All 257 tests
+# All 275 tests
 pytest tests/ -v
 
 # Single module

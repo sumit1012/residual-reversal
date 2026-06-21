@@ -5,7 +5,7 @@ honest test of whether a near-uncorrelated, market-neutral **residual-reversal**
 improves it. Built end-to-end as a hedge-fund-style research project: factor-neutral
 signals, realistic costs, overfitting controls, and a pre-registered out-of-sample track.
 
-![Tests](https://img.shields.io/badge/tests-266%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-275%20passing-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Data](https://img.shields.io/badge/data-free%20(yfinance%20%2B%20Ken%20French%20%2B%20FRED)-blue)
 
@@ -33,9 +33,9 @@ that does not hold, is the point of the project.
 
 | Sleeve | Sharpe | Ann. return | Ann. vol | Max DD |
 |--------|--------|-------------|----------|--------|
-| Trend | 0.46 | 4.7% | 10.8% | −18.9% |
-| Reversal | 0.29* | 1.3% | 4.8% | −7.0% |
-| Combined (risk-parity) | 0.52 | 5.3% | — | −13.3% |
+| Trend | 0.46 | 4.7% | 10.2% | −18.9% |
+| Reversal | 0.29* | 1.3% | 4.5% | −7.0% |
+| Combined (risk-parity) | 0.52 | 5.3% | 10.2% | −13.3% |
 
 **Live, out-of-sample, 2025-01-01 → present** (parameters frozen; refreshed daily). The live
 figures drift day-to-day, and the reversal sleeve's optimizer is solver-sensitive run-to-run,
@@ -46,7 +46,9 @@ stable regardless of the exact figures: trend earns through the 2025-26 momentum
 reversal diversifier loses in it (it is structurally short momentum), and the combined book
 ends modestly negative, below trend alone. That is the result the project reports.
 
-Sleeve correlation: **−0.05**. The reversal/combined backtest figures are marked `*`
+Sleeve correlation: near-zero (about **−0.05** over the in-sample period; it is recomputed
+full-sample daily, so the live dashboard's current value drifts toward zero as the out-of-sample
+window grows). The reversal/combined backtest figures are marked `*`
 because the reversal optimizer is degenerate near its turnover cliff: its in-sample
 Sharpe varies run-to-run (roughly 0.0 to 0.4). The backtest block is therefore computed
 once and frozen; the live block updates daily. Trend's numbers are stable.
@@ -75,7 +77,7 @@ build_reports.py     Builds both sleeves, freezes the backtest block, emits the 
 python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 python build_reports.py        # builds sleeves, writes site/public/data/report.json
-pytest tests/ -v               # 266 tests
+pytest tests/ -v               # 275 tests
 ```
 
 ## Key design decisions
@@ -91,8 +93,8 @@ pytest tests/ -v               # 266 tests
 |----------|-------|
 | Data | yfinance, pandas-datareader (Ken French + FRED), SEC EDGAR (all free) |
 | Computation | NumPy, SciPy, statsmodels; cvxpy + CLARABEL |
-| Testing | pytest (266 tests) |
-| Site | Next.js + framer-motion (private repo), daily GitHub Action, Vercel |
+| Testing | pytest (275 tests), run in CI on every push (`.github/workflows/tests.yml`) |
+| Site | Next.js + framer-motion (deployment repo), daily GitHub Action refreshes the live block, Vercel |
 
 ## References
 

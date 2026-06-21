@@ -54,7 +54,7 @@ class Config:
     cpcv_n_groups: int = 6
     cpcv_k_test: int = 2
     cpcv_embargo: float = 0.01
-    trials_log: str = "data/trials.jsonl"
+    trials_log: str = "data/trials_reversal_archive.jsonl"  # git-tracked; the deflated-Sharpe trial set
 
     def to_dict(self) -> dict:
         """Serialize to plain dict (JSON-safe, for trial logging)."""

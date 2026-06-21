@@ -1,0 +1,34 @@
+name: tests
+
+# Runs the full test suite on every push / PR. The daily live-data refresh and the
+# Vercel deploy live in the deployment repo; this repo's CI proves the pipeline's
+# correctness (no look-ahead, costs, residualization, combiner, validation).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          PYTHONHASHSEED: "0"
+        run: pytest tests/ -q

@@ -201,7 +201,13 @@ def deflated_sharpe(
             if not line:
                 continue
             try:
-                trials.append(float(json.loads(line)["net_sharpe"]))
+                rec = json.loads(line)
+                # Tolerate both the flat schema and run.py's log_trial schema, which nests
+                # the metrics under "summary"; otherwise every trial is silently skipped.
+                ns = rec.get("net_sharpe")
+                if ns is None:
+                    ns = rec.get("summary", {}).get("net_sharpe")
+                trials.append(float(ns))
             except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 continue
 
