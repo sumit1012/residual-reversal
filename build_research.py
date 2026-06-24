@@ -129,9 +129,15 @@ def main():
         returns.to_parquet(cr)
         resid.to_parquet(cd)
 
+    returns_full = returns.copy()  # pre-window panel, for re-residualizing on FF3
     win = (returns.index >= START) & (returns.index <= END)
     returns = returns[win]
     resid = resid.reindex(returns.index)
+
+    # Inputs for the spec test (FF3 residual) and capacity (ADV); cheap, both are cached
+    # (Ken French factors and the append-only price cache).
+    factors = get_ff_factors(cfg)
+    adv = compute_adv(pull_prices(tickers, cfg.start_date, cfg.end_date, cfg), window=cfg.adv_window)
 
     K, G, COST = 5, 2, 10.0  # production-matched signal params; 10 bps round-trip on the decile sort
 
@@ -240,6 +246,80 @@ def main():
                 "frac_positive": round(sum(1 for p in cpaths if p > 0) / len(cpaths), 2),
                 "n_paths": len(cpaths)}
 
+    # ---- FF5-vs-FF3 specification test + factor decomposition (Ehsani-Linnainmaa) ----
+    # Does residualizing on FF5+UMD isolate idiosyncratic return, or just re-load on the
+    # omitted factors? Test 1: re-residualize on FF3 and compare the decile. Test 2: regress
+    # the strategy's own returns on all six factors and read the alpha and the loadings.
+    print("spec test...", flush=True)
+    cfg_ff3 = dataclasses.replace(cfg, factors=("Mkt-RF", "SMB", "HML"))
+    resid_ff3, _b3, _i3 = rolling_residuals(returns_full, factors, cfg_ff3)
+    resid_ff3 = resid_ff3.reindex(returns.index)
+    spec: dict = {}
+    for tag, rp in [("ff3", resid_ff3), ("ff5_umd", resid)]:
+        s = _signal(rp, K, G, "reversal")
+        g, _n, _t = _decile_ls(s, returns, cost_bps=COST)
+        ic = _xs_corr(s.rank(axis=1).shift(1), returns.rank(axis=1)).dropna()
+        st = _stats(g)
+        spec[tag] = {"sharpe": st["sharpe"] if st else None,
+                     "ic": round(float(ic.mean()), 4) if len(ic) > 40 else None,
+                     "ic_t": round(float(ic.mean() / (ic.std() / math.sqrt(len(ic)))), 1) if len(ic) > 40 and ic.std() else None}
+    s = _signal(resid, K, G, "reversal")
+    gross_rr, _n, _t = _decile_ls(s, returns, cost_bps=COST)
+    fac = factors.reindex(gross_rr.index)[list(cfg.factors)].dropna()
+    y = gross_rr.reindex(fac.index).dropna()
+    fac = fac.reindex(y.index)
+    X = np.column_stack([np.ones(len(y)), fac.values])
+    beta, _r, _rk, _sv = np.linalg.lstsq(X, y.values, rcond=None)
+    e = y.values - X @ beta
+    dof = max(1, len(y) - X.shape[1])
+    cov = (float(e @ e) / dof) * np.linalg.inv(X.T @ X)
+    tv = beta / np.sqrt(np.diag(cov))
+    sse, sst = float(e @ e), float(((y.values - y.values.mean()) ** 2).sum())
+    spec["factor_regression"] = {
+        "alpha_ann_pct": round(float(beta[0] * TD) * 100, 2),
+        "alpha_t": round(float(tv[0]), 1),
+        "r2": round(1 - sse / sst, 3),
+        "loadings": {f: {"beta": round(float(b), 3), "t": round(float(t), 1)}
+                     for f, b, t in zip(cfg.factors, beta[1:], tv[1:])},
+    }
+
+    # ---- capacity: Almgren impact vs AUM on the tradeable (5-day-hold) decile --------
+    # The daily sort is spread-bound; capacity is a property of the lower-turnover, held
+    # implementation. Impact per name = eta * sigma * sqrt(participation), participation =
+    # dollars-traded / dollar-ADV, so net return falls as the book grows.
+    print("capacity...", flush=True)
+    HOLD_CAP, HALF_SPREAD, ETA = 5, 2.5 / 1e4, 0.5
+    s = _signal(resid, K, G, "reversal").shift(1)
+    s = s.where(s.notna() & returns.notna())
+    ranks = s.rank(axis=1, pct=True)
+    nL = (ranks >= 0.9).sum(axis=1).replace(0, np.nan)
+    nS = (ranks <= 0.1).sum(axis=1).replace(0, np.nan)
+    w = (ranks >= 0.9).div(nL, axis=0).fillna(0.0) - (ranks <= 0.1).div(nS, axis=0).fillna(0.0)
+    keep = np.zeros(len(w), dtype=bool); keep[::HOLD_CAP] = True
+    w = w.where(pd.Series(keep, index=w.index), other=np.nan).ffill().fillna(0.0)
+    gross_cap = (w * returns).sum(axis=1)
+    dw = (w - w.shift(1)).abs()
+    adv_al = adv.reindex(index=returns.index, columns=returns.columns).ffill()
+    vol = returns.rolling(63).std()
+    cap_pts = []
+    for A in [1e6, 5e6, 1e7, 2.5e7, 5e7, 1e8, 2.5e8, 5e8, 1e9]:
+        part = ((A * dw) / adv_al).clip(lower=0).fillna(0.0)
+        impact = ETA * vol * np.sqrt(part)
+        cost_t = (dw * HALF_SPREAD).sum(axis=1) + (dw * impact).sum(axis=1).fillna(0.0)
+        st = _stats((gross_cap - cost_t).dropna())
+        cap_pts.append({"aum": A, "sharpe": st["sharpe"] if st else None,
+                        "ret": st["ann_return_pct"] if st else None})
+    be = None
+    for i in range(1, len(cap_pts)):
+        r0, r1 = cap_pts[i - 1]["ret"], cap_pts[i]["ret"]
+        if r0 is not None and r1 is not None and r0 >= 0 > r1:
+            f = r0 / (r0 - r1)
+            be = round(math.exp(math.log(cap_pts[i - 1]["aum"]) + f * (math.log(cap_pts[i]["aum"]) - math.log(cap_pts[i - 1]["aum"]))))
+            break
+    capacity = {"aums": [p["aum"] for p in cap_pts], "net_sharpe": [p["sharpe"] for p in cap_pts],
+                "net_ann_return_pct": [p["ret"] for p in cap_pts], "breakeven_aum": be,
+                "hold_days": HOLD_CAP, "half_spread_bps": 2.5, "eta": ETA, "lit_ceiling_usd": 9e9}
+
     report = {
         "window": {"start": START, "end": END},
         "params": {"lookback": K, "skip_gap": G, "cost_bps": COST, "deciles": 10},
@@ -247,6 +327,8 @@ def main():
         "parameter_grid": {"lookbacks": lookbacks, "gaps": gaps, "sharpe": grid},
         "holding_grid": {"lookbacks": lookbacks, "holds": holds, "sharpe": hgrid},
         "cpcv": cpcv,
+        "spec_test": spec,
+        "capacity": capacity,
         "regimes": regimes,
         "cost_curve": cost_curve,
         "decile_ann_turnover_x": ann_turnover,
