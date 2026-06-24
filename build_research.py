@@ -52,9 +52,10 @@ def _signal(panel: pd.DataFrame, k: int, g: int, direction: str) -> pd.DataFrame
     return -cum if direction == "reversal" else cum
 
 
-def _decile_ls(signal: pd.DataFrame, returns: pd.DataFrame, top=0.1, cost_bps=10.0):
+def _decile_ls(signal: pd.DataFrame, returns: pd.DataFrame, top=0.1, cost_bps=10.0, hold=1):
     """Equal-weight, dollar-neutral top-vs-bottom-decile long-short. Past-only: the signal
-    at t is shifted one day so it earns t+1's return. Returns (gross, net, turnover)."""
+    at t is shifted one day so it earns t+1's return. hold>1 rebalances every `hold` days
+    (weights held in between). Returns (gross, net, turnover)."""
     sig = signal.shift(1)
     valid = sig.notna() & returns.notna()
     sig = sig.where(valid)
@@ -64,11 +65,33 @@ def _decile_ls(signal: pd.DataFrame, returns: pd.DataFrame, top=0.1, cost_bps=10
     nL = long.sum(axis=1).replace(0, np.nan)
     nS = short.sum(axis=1).replace(0, np.nan)
     w = long.div(nL, axis=0).fillna(0.0) - short.div(nS, axis=0).fillna(0.0)
+    if hold > 1:
+        keep = np.zeros(len(w), dtype=bool)
+        keep[::hold] = True
+        w = w.where(pd.Series(keep, index=w.index), other=np.nan).ffill().fillna(0.0)
     gross = (w * returns).sum(axis=1)
     turnover = (w - w.shift(1)).abs().sum(axis=1)
     net = gross - turnover * cost_bps / 1e4
     ok = nL.notna() & nS.notna()
     return gross[ok].dropna(), net[ok].dropna(), turnover[ok].dropna()
+
+
+def _cpcv_paths(pnl: pd.Series, n_groups=6, k_test=2):
+    """Combinatorial out-of-sample Sharpe across held-out blocks: split the return series
+    into n_groups contiguous blocks, take every C(n_groups, k_test) combination as the
+    out-of-sample path, and report the Sharpe of each. A distribution, not one number."""
+    from itertools import combinations
+    pnl = pnl.dropna()
+    if len(pnl) < n_groups * 20:
+        return None
+    groups = np.array_split(np.arange(len(pnl)), n_groups)
+    paths = []
+    for combo in combinations(range(n_groups), k_test):
+        sel = np.sort(np.concatenate([groups[g] for g in combo]))
+        r = pnl.iloc[sel]
+        if len(r) > 30 and r.std():
+            paths.append(round(float(r.mean() / r.std() * math.sqrt(TD)), 2))
+    return paths or None
 
 
 def _stats(r: pd.Series) -> dict | None:
@@ -133,6 +156,16 @@ def main():
             "ic": round(ic_mean, 4) if ic_mean is not None else None,
             "ic_t": round(ic_t, 1) if ic_t is not None else None,
         }
+    # market-neutral baseline: a seeded-random dollar-neutral decile (no signal) -> ~0
+    rng = np.random.default_rng(0)
+    rand = pd.DataFrame(rng.standard_normal(returns.shape), index=returns.index, columns=returns.columns).where(returns.notna())
+    rgross, rnet, _rt = _decile_ls(rand, returns, cost_bps=COST)
+    ric = _xs_corr(rand.rank(axis=1).shift(1), returns.rank(axis=1)).dropna()
+    benchmarks["market_neutral_random"] = {
+        "gross": _stats(rgross), "net": _stats(rnet),
+        "ic": round(float(ric.mean()), 4) if len(ric) > 40 else None,
+        "ic_t": round(float(ric.mean() / (ric.std() / math.sqrt(len(ric)))), 1) if len(ric) > 40 and ric.std() else None,
+    }
 
     # ---- parameter robustness (residual reversal decile net Sharpe over k x g) --------
     print("parameter grid...", flush=True)
@@ -147,6 +180,19 @@ def main():
             st = _stats(gross)
             row.append(st["sharpe"] if st else None)
         grid.append(row)
+
+    # ---- holding-period robustness (residual reversal gross Sharpe over lookback x hold) --
+    print("holding grid...", flush=True)
+    holds = [1, 3, 5]
+    hgrid = []
+    for k in lookbacks:
+        hrow = []
+        for h in holds:
+            sig = _signal(resid, k, G, "reversal")
+            gh, _n, _t = _decile_ls(sig, returns, cost_bps=COST, hold=h)
+            st = _stats(gh)
+            hrow.append(st["sharpe"] if st else None)
+        hgrid.append(hrow)
 
     # ---- regime breakdown (residual reversal decile by VIX regime) -------------------
     print("regimes...", flush=True)
@@ -182,11 +228,25 @@ def main():
                            "ann_return_pct": st["ann_return_pct"] if st else None})
     ann_turnover = round(float(turnover.mean() * TD), 1)
 
+    # ---- CPCV out-of-sample Sharpe distribution (gross, signal-level) -----------------
+    print("cpcv...", flush=True)
+    sig = _signal(resid, K, G, "reversal")
+    cg, _cn, _ct = _decile_ls(sig, returns, cost_bps=0.0)
+    cpaths = _cpcv_paths(cg)
+    cpcv = None
+    if cpaths:
+        import statistics as _stat
+        cpcv = {"paths": sorted(cpaths), "median": round(_stat.median(cpaths), 2),
+                "frac_positive": round(sum(1 for p in cpaths if p > 0) / len(cpaths), 2),
+                "n_paths": len(cpaths)}
+
     report = {
         "window": {"start": START, "end": END},
         "params": {"lookback": K, "skip_gap": G, "cost_bps": COST, "deciles": 10},
         "benchmarks": benchmarks,
         "parameter_grid": {"lookbacks": lookbacks, "gaps": gaps, "sharpe": grid},
+        "holding_grid": {"lookbacks": lookbacks, "holds": holds, "sharpe": hgrid},
+        "cpcv": cpcv,
         "regimes": regimes,
         "cost_curve": cost_curve,
         "decile_ann_turnover_x": ann_turnover,
